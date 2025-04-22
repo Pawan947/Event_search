@@ -39,7 +39,7 @@ def get_data(location):
     """Get upcoming events for a specific location using SerpApi."""
     try:
         # Try to get API key from secrets first, then from environment variables
-        serpapi_key = os.getenv("SERPAPI_KEY")
+        serpapi_key = os.getenv("SERPAPI_KEY") or st.secrets.get("SERPAPI_KEY")
         
         if not serpapi_key:
             st.error("SERPAPI_KEY not found. Please configure your API keys.")
@@ -77,7 +77,7 @@ def ai_filtering(user_input, scraped_data):
     """Filter scraped data using Gemini AI to provide a relevant response."""
     try:
         # Try to get API key from secrets first, then from environment variables
-        google_api_key = os.getenv("GOOGLE_API_KEY")
+        google_api_key = os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
 
         
         if not google_api_key:
