@@ -94,7 +94,7 @@ def ai_filtering(user_input, scraped_data):
         }
         
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-2.5-flash",
             generation_config=generation_config
         )
         
@@ -147,4 +147,5 @@ def main():
             st.warning("Please enter a location to search for events.")
 
 if __name__ == "__main__":
+
     main()
