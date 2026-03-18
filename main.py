@@ -1,151 +1,143 @@
 import streamlit as st
 from serpapi import GoogleSearch
-import google.generativeai as genai
-from langchain_core.prompts import ChatPromptTemplate
 import os
 import dotenv
+import re
 
-# Load environment variables
 dotenv.load_dotenv()
 
-# System prompt for filtering Google scraped data
-system_prompt = """
-You are a helpful assistant. Your role is to filter the Google scraped data and provide the best result to the user.
+# =========================
+# 🧠 AUTO DORK GENERATOR
+# =========================
+def generate_dorks_from_input(user_input):
+    base_keywords = re.findall(r'\w+', user_input.lower())
 
-Rules:
-1. You are a helpful assistant.
-2. You must filter the data and give the best result to the user.
-3. Do not provide any irrelevant information or suggestions except event-related information from the data.
-4. Provide a to-the-point and clear response.
-"""
+    dorks = []
 
-# Prompt template for the agent
-agent_template = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
-    ("human", """
-    User Input: {user_input}
-    Scraped Data: {scraped_data}
-    
-    ---
-    Generate a response that:
-    1. Is relevant to the user input
-    2. Is concise and to the point
-    3. Does not include any irrelevant information or suggestions
-    4. Uses only the provided scraped data for event-related information
-    """)
-])
+    for word in base_keywords:
+        dorks.extend([
+            f'intitle:"{word}"',
+            f'inurl:"{word}"',
+            f'site:{word}.com "{word}"',
+            f'"{word}" events',
+        ])
 
-def get_data(location):
-    """Get upcoming events for a specific location using SerpApi."""
-    try:
-        # Try to get API key from secrets first, then from environment variables
-        serpapi_key = os.getenv("SERPAPI_KEY") or st.secrets.get("SERPAPI_KEY")
-        
-        if not serpapi_key:
-            st.error("SERPAPI_KEY not found. Please configure your API keys.")
-            return None
+    # Combine keywords (advanced dorks)
+    if len(base_keywords) >= 2:
+        joined = " ".join(base_keywords)
+        dorks.extend([
+            f'intitle:"{joined}"',
+            f'"{joined}" events',
+            f'inurl:event "{joined}"',
+        ])
 
+    return list(set(dorks))[:10]
+
+
+# =========================
+# 🌐 SERP FETCH
+# =========================
+def fetch_serp_results(dorks):
+    serpapi_key = os.getenv("SERPAPI_KEY") or st.secrets.get("SERPAPI_KEY")
+
+    if not serpapi_key:
+        st.error("Missing SERPAPI_KEY")
+        return []
+
+    all_results = []
+
+    for dork in dorks:
         params = {
             "api_key": serpapi_key,
             "engine": "google",
-            "q": f"upcoming events in {location}",
-            "google_domain": "google.co.in",
-            "gl": "in",
+            "q": dork,
             "hl": "en",
-            "tbs": "events",
-            "tbm": "nws",
-            "safe": "off"
+            "gl": "in",
         }
 
         search = GoogleSearch(params)
         results = search.get_dict()
-        if 'news_results' not in results or not results['news_results']:
-            return None
-        
-        return [{
-            'title': item.get('title', 'No title'),
-            'link': item.get('link', '#'),
-            'source': item.get('source', 'Unknown source'),
-            'date': item.get('date', 'Date not available'),
-            'snippet': item.get('snippet', 'No description')
-        } for item in results['news_results'][:5]]  # Get first 5 results
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return None
 
-def ai_filtering(user_input, scraped_data):
-    """Filter scraped data using Gemini AI to provide a relevant response."""
-    try:
-        # Try to get API key from secrets first, then from environment variables
-        google_api_key = os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
+        if "organic_results" in results:
+            for item in results["organic_results"][:3]:
+                all_results.append({
+                    "title": item.get("title"),
+                    "link": item.get("link"),
+                    "snippet": item.get("snippet"),
+                    "source_dork": dork
+                })
 
-        
-        if not google_api_key:
-            st.error("GOOGLE_API_KEY not found. Please configure your API keys.")
-            return None
+    return all_results
 
-        genai.configure(api_key=google_api_key)
-        
-        generation_config = {
-            "temperature": 0.4,
-            "top_p": 0.8,
-            "top_k": 40,
-            "max_output_tokens": 500,
-        }
-        
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=generation_config
-        )
-        
-        prompt = agent_template.format(
-            user_input=user_input,
-            scraped_data=str(scraped_data) if scraped_data else "No event data available."
-        )
-        
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error in AI filtering: {e}"
 
+# =========================
+# 🧹 PARSER + FILTER
+# =========================
+def parse_results(results):
+    seen = set()
+    cleaned = []
+
+    for r in results:
+        if not r["link"] or r["link"] in seen:
+            continue
+
+        seen.add(r["link"])
+
+        # Basic relevance filter
+        if any(word in r["title"].lower() for word in ["event", "fest", "conference", "workshop"]):
+            cleaned.append(r)
+
+    return cleaned[:10]
+
+
+# =========================
+# 🎨 STREAMLIT UI
+# =========================
 def main():
-    st.set_page_config(page_title="Event Finder", page_icon="🎪")
-    st.title("Local Event Finder")
-    st.write("Discover upcoming events in your area!")
-    
-    location = st.text_input("Enter a location:", placeholder="e.g., Mumbai, New York, London...")
-    
-    if st.button("Find Events"):
-        if location:
-            with st.spinner("Searching for events..."):
-                scraped_data = get_data(location)
-                
-            if not scraped_data:
-                st.warning("No events found for this location.")
-                return
-                
-            st.subheader("📅 Upcoming Events Summary")
-            with st.expander("View Raw Event Data", expanded=False):
-                for idx, event in enumerate(scraped_data, 1):
-                    st.markdown(f"""
-                    **Event {idx}**
-                    - **Title**: {event['title']}
-                    - **Source**: {event['source']}
-                    - **Date**: {event['date']}
-                    - **Description**: {event['snippet']}
-                    - **Link**: {event['link']}
-                    """)
-            
-            with st.spinner("Analyzing events..."):
-                user_input = f"upcoming events in {location}"
-                filtered_response = ai_filtering(user_input, scraped_data)
-                
-            st.subheader("✨ Curated Event Suggestions")
-            st.markdown(filtered_response)
-            
-        else:
-            st.warning("Please enter a location to search for events.")
+    st.set_page_config(page_title="Auto Dork Engine", page_icon="🧠")
 
+    st.title("🧠 Dynamic Google Dork Engine")
+    st.write("Input → Dork → SERP → Parsed Results")
+
+    user_input = st.text_input("Enter query", placeholder="e.g., tech events Delhi")
+
+    if st.button("Run Engine"):
+        if not user_input:
+            st.warning("Enter something")
+            return
+
+        # Step 1: Generate dorks
+        dorks = generate_dorks_from_input(user_input)
+
+        st.subheader("🔍 Generated Dorks")
+        for d in dorks:
+            st.code(d)
+
+        # Step 2: Fetch results
+        with st.spinner("Fetching results..."):
+            raw_results = fetch_serp_results(dorks)
+
+        if not raw_results:
+            st.warning("No results found")
+            return
+
+        # Step 3: Parse results
+        parsed = parse_results(raw_results)
+
+        # Step 4: Display
+        st.subheader("📊 Parsed Results")
+
+        for i, r in enumerate(parsed, 1):
+            st.markdown(f"""
+**{i}. {r['title']}**  
+{r['snippet']}  
+🔗 {r['link']}  
+🧠 Dork Used: `{r['source_dork']}`
+""")
+
+
+# =========================
+# ▶ RUN
+# =========================
 if __name__ == "__main__":
-
     main()
